@@ -1,0 +1,194 @@
+version: 2
+
+build: &build
+  name: build packages
+  command: |
+    wget https://dl.google.com/go/go1.21.5.linux-amd64.tar.gz
+    sudo tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz
+    export PATH=$PATH:/usr/local/go/bin
+    export GOPATH=/home/circleci/go
+    export PATH="$PATH:$GOPATH/bin"
+    export GO111MODULE=on
+    export GOPROXY=direct
+    export GOSUMDB=off
+    ./node_modules/.bin/serverless package
+
+stgEnv: &stgEnv
+  name: stg settings
+  command: |
+    echo 'export GO_ENV=staging' >> $BASH_ENV
+    echo 'export AWS_ACCESS_KEY_ID=${STG_AWS_ACCESS_KEY_ID}' >> $BASH_ENV
+    echo 'export AWS_SECRET_ACCESS_KEY=${STG_AWS_SECRET_ACCESS_KEY}' >> $BASH_ENV
+    echo 'export APP_ENV=stg' >> $BASH_ENV
+    source $BASH_ENV
+
+prdEnv: &prdEnv
+  name: prd settings
+  command: |
+    echo 'export GO_ENV=staging' >> $BASH_ENV
+    echo 'export AWS_ACCESS_KEY_ID=${PRD_AWS_ACCESS_KEY_ID}' >> $BASH_ENV
+    echo 'export AWS_SECRET_ACCESS_KEY=${PRD_AWS_SECRET_ACCESS_KEY}' >> $BASH_ENV
+    echo 'export APP_ENV=prd' >> $BASH_ENV
+    source $BASH_ENV
+
+jobs:
+  test:
+    docker:
+      - image: cimg/node:20.4
+    resource_class: medium
+    steps:
+      - checkout
+
+      - run:
+          name: npm install
+          command: npm i
+      
+      - run: *stgEnv
+      - run: *build
+
+  deploy_stg:
+    resource_class: medium
+    docker:
+      - image: cimg/node:20.4
+      - run:
+          name: install aws-cli and configure
+          command: |
+            sudo apt-get update && sudo apt-get install python3-pip groff-base
+            sudo pip3 install awscli --ignore-installed six
+            aws configure set aws_access_key_id ${STG_AWS_ACCESS_KEY_ID} --profile serverless
+            aws configure set aws_secret_access_key ${STG_AWS_SECRET_ACCESS_KEY} --profile serverless
+
+      - run:
+          name: npm install
+          command: npm i
+      
+      - run: *stgEnv
+      - run: *build
+
+      - run:
+          name: stg deploy
+          command: |
+            export PATH=$PATH:/usr/local/go/bin
+            export GOPATH=/home/circleci/go
+            export PATH="$PATH:$GOPATH/bin"
+            ./node_modules/.bin/serverless deploy --stage stg --aws-profile serverless --verbose
+            
+  deploy_prd:
+    resource_class: medium
+    docker:
+      - image: cimg/node:20.4
+      - run:
+          name: install aws-cli and configure
+          command: |
+            sudo apt-get update && sudo apt-get install python3-pip groff-base
+            sudo pip3 install awscli --ignore-installed six
+            aws configure set aws_access_key_id ${PRD_AWS_ACCESS_KEY_ID} --profile serverless
+            aws configure set aws_secret_access_key ${PRD_AWS_SECRET_ACCESS_KEY} --profile serverless
+
+      - run:
+          name: npm install
+          command: npm i
+      
+      - run: *prdEnv
+      - run: *build
+
+      - run:
+          name: prd deploy
+          command: |
+            export PATH=$PATH:/usr/local/go/bin
+            export GOPATH=/home/circleci/go
+            export PATH="$PATH:$GOPATH/bin"
+            ./node_modules/.bin/serverless deploy --stage prd --aws-profile serverless --verbose
+            
+  git_pr_develop_to_staging:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: create pull request staging to release
+          command: |
+            git config user.email "program@eight8.tech"
+            git config user.name "Yuta-Hachino"
+            git checkout -b auto-pr-develop-$(date +%Y-%m-%d)
+            git pull origin develop
+            git push origin auto-pr-develop-$(date +%Y-%m-%d)
+            curl -X POST -H "Authorization: token $GITHUB_TOKEN" -d '{"title":"Automated PR","head":"auto-pr-develop-$(date +%Y-%m-%d)","base":"staging"}' https://api.github.com/repos/your_username/your_repo/pulls
+
+  git_pr_staging_to_release:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: create pull request staging to release
+          command: |
+            git config user.email "program@eight8.tech"
+            git config user.name "Yuta-Hachino"
+            git checkout -b auto-pr-staging-$(date +%Y-%m-%d)
+            git pull origin staging
+            git push origin auto-pr-staging-$(date +%Y-%m-%d)
+            curl -X POST -H "Authorization: token $GITHUB_TOKEN" -d '{"title":"Automated PR","head":"auto-pr-staging-$(date +%Y-%m-%d)","base":"release"}' https://api.github.com/repos/your_username/your_repo/pulls
+
+  git_pr_release_to_main:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: create pull request release to main
+          command: |
+            git config user.email "program@eight8.tech"
+            git config user.name "Yuta-Hachino"
+            git checkout -b auto-pr-release-$(date +%Y-%m-%d)
+            git pull origin release
+            git push origin auto-pr-release-$(date +%Y-%m-%d)
+            curl -X POST -H "Authorization: token $GITHUB_TOKEN" -d '{"title":"Automated PR","head":"auto-pr-release-$(date +%Y-%m-%d)","base":"main"}' https://api.github.com/repos/Yuta-Hachino/ads-management-api/pulls
+
+  git_pr_main_to_develop:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: create pull request main to develop
+          command: |
+            git config user.email "program@eight8.tech"
+            git config user.name "Yuta-Hachino"
+            git checkout -b auto-pr-main-$(date +%Y-%m-%d)
+            git pull origin main
+            git push origin auto-pr-main-$(date +%Y-%m-%d)
+            curl -X POST -H "Authorization: token $GITHUB_TOKEN" -d '{"title":"Automated PR","head":"auto-pr-main-$(date +%Y-%m-%d)","base":"develop"}' https://api.github.com/repos/Yuta-Hachino/ads-management-api/pulls
+
+workflows:
+  version: 2
+  deploy:
+    jobs:
+      - test:
+          filters:
+            branches:
+              only: develop
+      - deploy_stg:
+          filters:
+            branches:
+              only: staging
+      - deploy_prd:
+          filters:
+            branches:
+              only: release
+      - git_pr_develop_to_staging:
+          context: STG
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - develop
+      - git_pr_staging_to_release:
+          context: PRD
+          requires:
+            - deploy_stg
+          filters:
+            branches:
+              only:
+                - staging
