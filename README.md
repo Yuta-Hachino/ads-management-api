@@ -1,1 +1,1 @@
-# app-study-api
+# ads-management-api
