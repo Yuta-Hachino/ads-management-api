@@ -34,5 +34,61 @@ custom:
     automatic: true
     number: 3
   
-  
-  
+
+resources:
+  Resources:
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:provider.stage}-user-pool
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        VerificationMessageTemplate:
+          DefaultEmailOption: CONFIRM_WITH_LINK
+    
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: ${self:provider.stage}-user-pool-client
+        UserPoolId: ${self:custom.environment.${self:provider.stage}.COGNITO_USER_POOL_ID}
+        ExplicitAuthFlows:
+          - ADMIN_NO_SRP_AUTH
+        GenerateSecret: false
+    
+    UserPoolDomain:
+      Type: AWS::Cognito::UserPoolDomain
+      Properties:
+        Domain: ads-management-${self:provider.stage}
+        UserPoolId: ${self:custom.environment.${self:provider.stage}.COGNITO_USER_POOL_ID}
+
+    UserPoolResourceServer:
+      Type: AWS::Cognito::UserPoolResourceServer
+      Properties:
+        Identifier: ads-management-${self:provider.stage}
+        Name: ads-management-${self:provider.stage}
+        UserPoolId: ${self:custom.environment.${self:provider.stage}.COGNITO_USER_POOL_ID}
+    
+    MyApiGatewayAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        IdentitySource: method.request.header.Authorization
+        Name: MyCognitoAuthorizer
+        RestApiId: 
+          Ref: ApiGatewayRestApi
+        Type: COGNITO_USER_POOLS
+        ProviderARNs:
+          - Fn::Join:
+            - ""
+            - - "arn:aws:cognito-idp"
+              - Ref: "AWS::Region"
+              - ":"
+              - Ref: "AWS::AccountId"
+              - ":userpool/"
+              - "${self:custom.environment.${self:provider.stage}.COGNITO_USER_POOL_ID}"
+
+plugins:
+  - serverless-offline
+  - serverless-prune-plugin
+  - serverless-go-plugin

@@ -192,3 +192,15 @@ workflows:
             branches:
               only:
                 - staging
+      - git_pr_release_to_main:
+          context: DEV
+          filters:
+            branches:
+              only:
+                - release
+      - git_pr_main_to_develop:
+          context: DEV
+          filters:
+            branches:
+              only:
+                - main
